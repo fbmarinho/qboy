@@ -1,5 +1,7 @@
 Qboy	KEYWORD1
+connect	KEYWORD2
 pair	KEYWORD2
 unpair	KEYWORD2
 listen  KEYWORD2
 isConnected	KEYWORD3
+isPaired	KEYWORD3
