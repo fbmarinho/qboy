@@ -5,7 +5,7 @@
 */
 
 #include "Arduino.h"
-#include "string.h"
+#include <string.h>
 #include "Qboy.h"
 
 //For display
@@ -21,7 +21,7 @@
 
 //Time controle
 #include <Ticker.h>
-Ticker pinger;
+Ticker clock;
 // 1      2      3      4      5      6         7     8
 // VCC / GND  / SCE  / RST /  DC / DN(MOSI) / SCLK / LED
 // pins
@@ -38,23 +38,90 @@ Adafruit_PCD8544 screen = Adafruit_PCD8544(DC_PIN, CE_PIN, RST_PIN);
 Qboy::Qboy(const char *id)
 {
   //setup
-
+  counterPing = 0;
+  counterPair = 0;
+  shouldPing = false;
+  shouldPair = false;
   pinMode(BL_PIN, OUTPUT);
   _id = id;
   showLogo();
+  Serial.println("QBoy V1.0");
 }
 
 //Conectar a rede
-void Qboy::connect(const char *ssid, const char *password, int checkInterval)
+void Qboy::connect(const char *ssid, const char *password, int _pingInterval, int _pairInterval, int _listenInterval)
 {
+  pingInterval = _pingInterval;
+  pairInterval = _pairInterval;
+  listenInterval = _listenInterval;
+
   isConnected = false;
+  shouldPair = false;
   WiFi.begin(ssid, password);
-  pinger.attach(checkInterval, &Qboy::_ping, this);
+
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    Serial.print(".");
+    delay(200);
+  }
+  Serial.print("Conectado no IP: ");
+  Serial.println(WiFi.localIP());
+  isConnected = true;
+  shouldPair = true;
+
+  clock.attach(1, &Qboy::_tick, this); // Start clock tick
 }
 
-void Qboy::_ping(Qboy *pThis)
+//Loop
+void Qboy::loop()
 {
-  pThis->ping();
+  if (shouldPing)
+  {
+    ping();
+    shouldPing = false;
+  }
+
+  if (isConnected && shouldPair)
+  {
+    pair();
+    shouldPair = false;
+  }
+
+  if (isPaired && shouldListen)
+  {
+    listen();
+    shouldListen = false;
+  }
+}
+
+void Qboy::_tick(Qboy *pThis)
+{
+  pThis->tick();
+}
+
+void Qboy::tick()
+{
+  if (counterPing >= pingInterval - 1)
+  {
+    shouldPing = true;
+    counterPing = 0;
+  }
+
+  if (counterPair >= pairInterval - 1)
+  {
+    shouldPair = true;
+    counterPair = 0;
+  }
+
+  if (counterListen >= listenInterval - 1)
+  {
+    shouldListen = true;
+    counterListen = 0;
+  }
+
+  counterPing++;
+  counterPair++;
+  counterListen++;
 }
 
 void Qboy::ping()
@@ -63,21 +130,22 @@ void Qboy::ping()
   {
     Serial.println("Ping !");
     isConnected = true;
-    pair();
+  }
+  else
+  {
+    isConnected = false;
+    Serial.println("Not connected !");
   }
 }
 
 //Parear dispositivo
 void Qboy::pair()
 {
-  Serial.print("Chamando: ");
-
   std::string url = std::string("http://easystop.com.br/api/qboy/dispositivo/parear/") + std::string(_id);
 
-  Serial.println(url.c_str());
-
+  //Serial.println(url.c_str());
+  isPaired = false;
   HTTPClient http;
-
   http.begin(url.c_str());
 
   int httpCode = http.GET();
@@ -85,25 +153,30 @@ void Qboy::pair()
   //Check the returning code
   if (httpCode > 0)
   {
-    // Parsing
-    const size_t capacity = JSON_ARRAY_SIZE(1) + JSON_OBJECT_SIZE(17) + 360;
-    DynamicJsonDocument doc(capacity);
-
-    String json = http.getString();
-
-    if (json != "[]")
+    if (httpCode == HTTP_CODE_OK)
     {
 
-      deserializeJson(doc, json);
+      // Parsing
+      const size_t capacity = JSON_ARRAY_SIZE(1) + JSON_OBJECT_SIZE(17) + 360;
+      DynamicJsonDocument doc(capacity);
 
-      JsonObject obj = doc[0];
+      String json = http.getString();
 
-      idPedido = obj["id_pedido_exame"];
+      if (json != "[]")
+      {
 
-      Serial.print("Pedido: ");
-      Serial.println(idPedido);
+        deserializeJson(doc, json);
 
-      isPaired = true;
+        JsonObject obj = doc[0];
+
+        idPedido = obj["id_pedido_exame"];
+
+        Serial.print("Pedido: ");
+        Serial.println(idPedido);
+
+        isPaired = true;
+      }
+
       //const char *obj_id_Chamado = obj["id_Chamado"];
       //const char *obj_id_pedido_exame = obj["id_pedido_exame"];
       // const char *obj_id_dispositivo = obj["id_dispositivo"];
@@ -118,21 +191,115 @@ void Qboy::pair()
       // const char *obj_qtd_vibracoes = obj["qtd_vibracoes"];
       // const char *obj_segundos_vibracoes = obj["segundos_vibracoes"];
     }
+    else
+    {
+      Serial.print("HTTPCODE: ");
+      Serial.println(httpCode);
+    }
   }
   else
   {
-    Serial.println("Erro ao parear !");
+    Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
   }
 
   http.end(); //Close connection
 }
 
-// //Escutar chamados
-// void Qboy::listen()
-// {
-// }
+//Escutar chamados
+void Qboy::listen()
+{
+  std::string url = std::string("http://easystop.com.br/api/qboy/dispositivo/checar/") + std::string(_id) + std::string("&") + std::string(idPedido);
 
-// Private methods
+  //Serial.println(url.c_str());
+  HTTPClient http;
+  http.begin(url.c_str());
+
+  int httpCode = http.GET();
+
+  //Check the returning code
+  if (httpCode > 0)
+  {
+    if (httpCode == HTTP_CODE_OK)
+    {
+
+      String json = http.getString();
+
+      if (json != "[]")
+      {
+        // Parsing
+        const size_t capacity = JSON_ARRAY_SIZE(1) + JSON_OBJECT_SIZE(21) + 520;
+        DynamicJsonDocument doc(capacity);
+
+        deserializeJson(doc, json);
+
+        JsonObject obj = doc[0];
+        //const char *obj_id_Chamado = obj["id_Chamado"];                             // "141"
+        //const char *obj_id_pedido_exame = obj["id_pedido_exame"];                   // "1450"
+        //const char *obj_id_dispositivo = obj["id_dispositivo"];                     // "1456600300kkkksss*"
+        //const char *obj_dt_chamado = obj["dt_chamado"];                             // "2019-08-21 14:32:13"
+        //const char *obj_is_Chamando = obj["is_Chamando"];                           // "0"
+        const char *sala = obj["sala"]; // "07"
+
+        const char *m1 = obj["mensagem"];                             // "Sala de massagem"
+        unsigned int m1_time = atoi(obj["segundos_mensagem"]);        // "3"
+        unsigned int m1_loops = atoi(obj["qtd_repeticoes_mensagem"]); // "2"
+
+        const char *m2 = obj["mensagem1"];                             // "Teste de envio de mensagem1"
+        unsigned int m2_time = atoi(obj["segundos_mensagem1"]);        // "3"
+        unsigned int m2_loops = atoi(obj["qtd_repeticoes_mensagem1"]); // "2"
+
+        bool _vibration = atoi(obj["qtd_vibracoes"]) > 0; // "3"
+        //const char *obj_segundos_vibracoes = obj["segundos_vibracoes"];             // "1"
+        //const char *obj_dt_chamado_frma = obj["dt_chamado_frma"];                   // "21-08-2019"
+        //const char *obj_hr_chamado_formatado = obj["hr_chamado_formatado"];         // "14:32:13"
+
+        call(m1, m1_time, m1_loops, m2, m2_time, m2_loops, _vibration);
+      }
+    }
+    else
+    {
+      Serial.print("HTTPCODE: ");
+      Serial.println(httpCode);
+    }
+  }
+  else
+  {
+    Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
+  }
+
+  http.end(); //Close connection
+}
+
+void Qboy::call(const char *m1, unsigned int m1_time, unsigned int m1_count, const char *m2, unsigned int m2_time, unsigned int m2_count, bool _vibration)
+{
+  while (m1_count > 0 || m2_count > 0)
+  {
+    if (m1_count > 0)
+    {
+      Serial.println(m1);
+      if (_vibration)
+      {
+        vibrationOn();
+      }
+      delay_s(m1_time);
+      m1_count--;
+      vibrationOff();
+    }
+    if (m2_count > 0)
+    {
+      Serial.println(m2);
+      if (_vibration)
+      {
+        vibrationOn();
+      }
+      delay_s(m2_time);
+      m2_count--;
+      vibrationOff();
+    }
+    delay(1000);
+  }
+}
+
 void Qboy::backlightOn()
 {
   digitalWrite(BL_PIN, HIGH);
@@ -143,15 +310,14 @@ void Qboy::backlightOff()
   digitalWrite(BL_PIN, LOW);
 }
 
-void Qboy::vibrate(int n, int interval)
+void Qboy::vibrationOn()
 {
-  for (int i = 0; i <= n; i++)
-  {
-    digitalWrite(D8, HIGH);
-    delay(interval);
-    digitalWrite(D8, LOW);
-    delay(interval);
-  }
+  digitalWrite(D8, HIGH);
+}
+
+void Qboy::vibrationOff()
+{
+  digitalWrite(D8, LOW);
 }
 
 void Qboy::showLogo()
@@ -164,4 +330,12 @@ void Qboy::showLogo()
   screen.setCursor(0, 0);
   screen.drawBitmap(0, 0, logo, 84, 48, BLACK);
   screen.display();
+}
+
+void Qboy::delay_s(unsigned int time)
+{
+  for (unsigned int i = 0; i < time; i++)
+  {
+    delay(1000);
+  }
 }
