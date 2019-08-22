@@ -1,5 +1,7 @@
 Qboy	KEYWORD1
 connect	KEYWORD2
+start	KEYWORD2
+loop	KEYWORD2
 pair	KEYWORD2
 unpair	KEYWORD2
 listen  KEYWORD2

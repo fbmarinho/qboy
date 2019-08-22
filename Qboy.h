@@ -14,6 +14,7 @@ class Qboy
 public:
   Qboy(const char *id);
   void connect(const char *ssid, const char *password, int _pingInterval, int _pairInterval, int _listenInterval);
+  void start();
   void loop();
 
 private:
@@ -24,12 +25,10 @@ private:
   void pair();
   void listen();
   void call(const char *m1, unsigned int m1_time, unsigned int m1_count, const char *m2, unsigned int m2_time, unsigned int m2_count, bool _vibration);
-  void showLogo();
-  void backlightOn();
-  void backlightOff();
   void vibrationOn();
   void vibrationOff();
   const char *idPedido;
+  char *wifiStatus;
   bool isConnected;
   bool isPaired;
   int counterPing;
@@ -42,6 +41,10 @@ private:
   int listenInterval;
   bool shouldListen;
   void delay_s(unsigned int time);
+  void showLogo(int time);
+  void scroll(char *message);
+  void mainScreen();
+  char *mainMessage;
 };
 
 #endif

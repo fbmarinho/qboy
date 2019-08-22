@@ -10,42 +10,103 @@
 
 //For display
 #include <SPI.h>
+#include <Wire.h>
 #include <Adafruit_GFX.h>
-#include <Adafruit_PCD8544.h>
-#include "logo.h"
+#include <Adafruit_SSD1306.h>
+#include "brmed.h"
+
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+
+// Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
+#define OLED_RESET -1 // Reset pin # (or -1 if sharing Arduino reset pin)
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 //For wifi
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
 #include <ArduinoJson.h>
 
-//Time controle
+//Time control
 #include <Ticker.h>
 Ticker clock;
-// 1      2      3      4      5      6         7     8
-// VCC / GND  / SCE  / RST /  DC / DN(MOSI) / SCLK / LED
-// pins
-const int8_t RST_PIN = D2;
-const int8_t CE_PIN = D1;
-const int8_t DC_PIN = D6;
-//const int8_t DIN_PIN = D7;  // Uncomment for Software SPI
-//const int8_t CLK_PIN = D5;  // Uncomment for Software SPI
-const int8_t BL_PIN = D0;
-
-Adafruit_PCD8544 screen = Adafruit_PCD8544(DC_PIN, CE_PIN, RST_PIN);
 
 //Constructor
 Qboy::Qboy(const char *id)
 {
-  //setup
   counterPing = 0;
   counterPair = 0;
   shouldPing = false;
   shouldPair = false;
-  pinMode(BL_PIN, OUTPUT);
+  wifiStatus = "X";
+  mainMessage = "Aguarde o chamado";
   _id = id;
-  showLogo();
-  Serial.println("QBoy V1.0");
+}
+
+// Setup stage
+void Qboy::start()
+{
+  pinMode(D8, OUTPUT);
+  //initialize display
+  // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
+  { // Address 0x3D for 128x64
+    Serial.println(F("SSD1306 allocation failed"));
+    for (;;)
+      ; // Don't proceed, loop forever
+  }
+
+  display.clearDisplay();
+  display.display();
+  delay(500);
+
+  showLogo(2000);
+}
+
+void Qboy::scroll(char *message)
+{
+  display.clearDisplay();
+  display.setTextSize(2);
+  display.setTextWrap(false);
+  display.setTextColor(WHITE);
+
+  int x = display.width();
+  int len = 12 * strlen(message); // 12 = 6 pixels/character * text size 2
+
+  for (int i = 0; i <= 2 * len; i++)
+  {
+    display.clearDisplay();
+    display.setCursor(x, 20);
+    display.print(message);
+    display.display();
+
+    if (--x < -len)
+      x = display.width();
+  }
+}
+
+void Qboy::mainScreen()
+{
+  display.clearDisplay();
+  display.setTextColor(WHITE);
+  display.drawLine(0, 12, 128, 12, WHITE);
+
+  display.setTextSize(1);
+
+  display.setCursor(1, 1);
+  display.print("WiFi: ");
+  display.print(wifiStatus);
+
+  display.setCursor(64, 1);
+  display.print("Exame:");
+  display.print(idPedido);
+
+  display.setTextSize(2);
+
+  display.setCursor(20, 20);
+  display.print(mainMessage);
+
+  display.display();
 }
 
 //Conectar a rede
@@ -66,6 +127,7 @@ void Qboy::connect(const char *ssid, const char *password, int _pingInterval, in
   }
   Serial.print("Conectado no IP: ");
   Serial.println(WiFi.localIP());
+  wifiStatus = "OK";
   isConnected = true;
   shouldPair = true;
 
@@ -75,6 +137,8 @@ void Qboy::connect(const char *ssid, const char *password, int _pingInterval, in
 //Loop
 void Qboy::loop()
 {
+  mainScreen();
+
   if (shouldPing)
   {
     ping();
@@ -126,15 +190,22 @@ void Qboy::tick()
 
 void Qboy::ping()
 {
+
   if (WiFi.status() == WL_CONNECTED)
   {
     Serial.println("Ping !");
+
+    wifiStatus = "OK";
+
     isConnected = true;
   }
   else
   {
-    isConnected = false;
     Serial.println("Not connected !");
+
+    wifiStatus = "X";
+
+    isConnected = false;
   }
 }
 
@@ -175,6 +246,10 @@ void Qboy::pair()
         Serial.println(idPedido);
 
         isPaired = true;
+      }
+      else
+      {
+        idPedido = " - ";
       }
 
       //const char *obj_id_Chamado = obj["id_Chamado"];
@@ -252,6 +327,7 @@ void Qboy::listen()
         //const char *obj_segundos_vibracoes = obj["segundos_vibracoes"];             // "1"
         //const char *obj_dt_chamado_frma = obj["dt_chamado_frma"];                   // "21-08-2019"
         //const char *obj_hr_chamado_formatado = obj["hr_chamado_formatado"];         // "14:32:13"
+        mainMessage = "Dirija-se a sala";
 
         call(m1, m1_time, m1_loops, m2, m2_time, m2_loops, _vibration);
       }
@@ -300,16 +376,6 @@ void Qboy::call(const char *m1, unsigned int m1_time, unsigned int m1_count, con
   }
 }
 
-void Qboy::backlightOn()
-{
-  digitalWrite(BL_PIN, HIGH);
-}
-
-void Qboy::backlightOff()
-{
-  digitalWrite(BL_PIN, LOW);
-}
-
 void Qboy::vibrationOn()
 {
   digitalWrite(D8, HIGH);
@@ -320,22 +386,18 @@ void Qboy::vibrationOff()
   digitalWrite(D8, LOW);
 }
 
-void Qboy::showLogo()
-{
-  backlightOn();
-  screen.begin();
-  screen.setTextSize(1);
-  screen.setTextColor(BLACK);
-  screen.clearDisplay();
-  screen.setCursor(0, 0);
-  screen.drawBitmap(0, 0, logo, 84, 48, BLACK);
-  screen.display();
-}
-
 void Qboy::delay_s(unsigned int time)
 {
   for (unsigned int i = 0; i < time; i++)
   {
     delay(1000);
   }
+}
+
+void Qboy::showLogo(int time)
+{
+  display.clearDisplay();
+  display.drawBitmap(0, 0, logo, 128, 64, WHITE);
+  display.display();
+  delay(time);
 }
