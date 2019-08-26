@@ -21,13 +21,19 @@ private:
   const char *_id;
   static void _tick(Qboy *pThis);
   void tick();
+  static void _refresh(Qboy *pThis);
+  void refresh();
+  bool shouldRefresh;
   void ping();
   void pair();
   void listen();
   void call(const char *m1, unsigned int m1_time, unsigned int m1_count, const char *m2, unsigned int m2_time, unsigned int m2_count, bool _vibration);
-  void vibrationOn();
-  void vibrationOff();
-  const char *idPedido;
+  void beep(unsigned int times);
+  void flash(unsigned int times);
+  void vibrate(unsigned int times, unsigned int interval);
+  bool calling;
+  char *sala;
+  char *idPedido;
   char *wifiStatus;
   bool isConnected;
   bool isPaired;
@@ -44,7 +50,8 @@ private:
   void showLogo(int time);
   void scroll(char *message);
   void mainScreen();
-  char *mainMessage;
+  char *mainText;
+  char *message;
 };
 
 #endif

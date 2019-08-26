@@ -30,6 +30,11 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 //Time control
 #include <Ticker.h>
 Ticker clock;
+Ticker screenRefresh;
+
+#define LED_PIN D6
+#define VIBRATION_PIN D7
+#define BEEP_PIN D8
 
 //Constructor
 Qboy::Qboy(const char *id)
@@ -38,15 +43,21 @@ Qboy::Qboy(const char *id)
   counterPair = 0;
   shouldPing = false;
   shouldPair = false;
+  calling = false;
+  sala = "17";
   wifiStatus = "X";
-  mainMessage = "Aguarde o chamado";
+  idPedido = "WAIT";
+  mainText = "AGUARDE";
+  message = "";
   _id = id;
 }
 
 // Setup stage
 void Qboy::start()
 {
-  pinMode(D8, OUTPUT);
+  pinMode(LED_PIN, OUTPUT);
+  pinMode(BEEP_PIN, OUTPUT);
+  pinMode(VIBRATION_PIN, OUTPUT);
   //initialize display
   // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
@@ -61,38 +72,31 @@ void Qboy::start()
   delay(500);
 
   showLogo(2000);
+
+  screenRefresh.attach_ms(100, &Qboy::_refresh, this); // Start screen refresh
 }
 
-void Qboy::scroll(char *message)
+void Qboy::_refresh(Qboy *pThis)
 {
-  display.clearDisplay();
-  display.setTextSize(2);
-  display.setTextWrap(false);
-  display.setTextColor(WHITE);
+  pThis->refresh();
+}
 
-  int x = display.width();
-  int len = 12 * strlen(message); // 12 = 6 pixels/character * text size 2
-
-  for (int i = 0; i <= 2 * len; i++)
-  {
-    display.clearDisplay();
-    display.setCursor(x, 20);
-    display.print(message);
-    display.display();
-
-    if (--x < -len)
-      x = display.width();
-  }
+void Qboy::refresh()
+{
+  shouldRefresh = true;
 }
 
 void Qboy::mainScreen()
 {
   display.clearDisplay();
-  display.setTextColor(WHITE);
+
   display.drawLine(0, 12, 128, 12, WHITE);
+  display.drawLine(0, 44, 128, 44, WHITE);
 
+  display.setTextColor(WHITE);
+
+  // First line
   display.setTextSize(1);
-
   display.setCursor(1, 1);
   display.print("WiFi: ");
   display.print(wifiStatus);
@@ -101,12 +105,35 @@ void Qboy::mainScreen()
   display.print("Exame:");
   display.print(idPedido);
 
-  display.setTextSize(2);
+  // Main text
+  display.setCursor(0, 18);
+  display.setTextSize(3);
+  display.print(mainText);
 
-  display.setCursor(20, 20);
-  display.print(mainMessage);
+  // Lower line
+  display.setCursor(0, 48);
+  display.setTextSize(2);
+  display.print(message);
 
   display.display();
+}
+
+void Qboy::scroll(char *message)
+{
+  display.setTextWrap(false);
+
+  int x = display.width();
+  int len = 12 * strlen(message); // 12 = 6 pixels/character * text size 2
+
+  for (int i = 0; i <= 2 * len; i++)
+  {
+    display.setCursor(x, 48);
+    display.print(message);
+    display.display();
+
+    if (--x < -len)
+      x = display.width();
+  }
 }
 
 //Conectar a rede
@@ -131,13 +158,18 @@ void Qboy::connect(const char *ssid, const char *password, int _pingInterval, in
   isConnected = true;
   shouldPair = true;
 
+  beep(3);
   clock.attach(1, &Qboy::_tick, this); // Start clock tick
 }
 
 //Loop
 void Qboy::loop()
 {
-  mainScreen();
+  if (shouldRefresh)
+  {
+    mainScreen();
+    shouldRefresh = false;
+  }
 
   if (shouldPing)
   {
@@ -190,7 +222,6 @@ void Qboy::tick()
 
 void Qboy::ping()
 {
-
   if (WiFi.status() == WL_CONNECTED)
   {
     Serial.println("Ping !");
@@ -216,6 +247,7 @@ void Qboy::pair()
 
   //Serial.println(url.c_str());
   isPaired = false;
+
   HTTPClient http;
   http.begin(url.c_str());
 
@@ -233,38 +265,34 @@ void Qboy::pair()
 
       String json = http.getString();
 
+      DeserializationError err = deserializeJson(doc, json);
+
+      //debug
+      if (err)
+      {
+        Serial.print(F("deserializeJson() failed with code "));
+        Serial.println(err.c_str());
+      }
+
       if (json != "[]")
       {
-
-        deserializeJson(doc, json);
-
         JsonObject obj = doc[0];
 
-        idPedido = obj["id_pedido_exame"];
+        strlcpy(idPedido, obj["id_pedido_exame"] | "ERRO", 5);
 
-        Serial.print("Pedido: ");
-        Serial.println(idPedido);
+        mainText = "AGUARDE";
 
         isPaired = true;
+
+        flash(1);
       }
       else
       {
-        idPedido = " - ";
-      }
+        strlcpy(idPedido, " N/A", 5);
+        mainText = "ASSOCIE";
 
-      //const char *obj_id_Chamado = obj["id_Chamado"];
-      //const char *obj_id_pedido_exame = obj["id_pedido_exame"];
-      // const char *obj_id_dispositivo = obj["id_dispositivo"];
-      // const char *obj_dt_associacao = obj["dt_associacao"];
-      // const char *obj_is_Chamando = obj["is_Chamando"];
-      // const char *obj_mensagem = obj["mensagem"];
-      // const char *obj_segundos_mensagem = obj["segundos_mensagem"];
-      // const char *obj_qtd_repeticoes_mensagem = obj["qtd_repeticoes_mensagem"];
-      // const char *obj_mensagem1 = obj["mensagem1"];
-      // const char *obj_segundos_mensagem1 = obj["segundos_mensagem1"];
-      // const char *obj_qtd_repeticoes_mensagem1 = obj["qtd_repeticoes_mensagem1"];
-      // const char *obj_qtd_vibracoes = obj["qtd_vibracoes"];
-      // const char *obj_segundos_vibracoes = obj["segundos_vibracoes"];
+        beep(1);
+      }
     }
     else
     {
@@ -285,7 +313,6 @@ void Qboy::listen()
 {
   std::string url = std::string("http://easystop.com.br/api/qboy/dispositivo/checar/") + std::string(_id) + std::string("&") + std::string(idPedido);
 
-  //Serial.println(url.c_str());
   HTTPClient http;
   http.begin(url.c_str());
 
@@ -312,24 +339,35 @@ void Qboy::listen()
         //const char *obj_id_pedido_exame = obj["id_pedido_exame"];                   // "1450"
         //const char *obj_id_dispositivo = obj["id_dispositivo"];                     // "1456600300kkkksss*"
         //const char *obj_dt_chamado = obj["dt_chamado"];                             // "2019-08-21 14:32:13"
-        //const char *obj_is_Chamando = obj["is_Chamando"];                           // "0"
-        const char *sala = obj["sala"]; // "07"
+        //const char *obj_is_Chamando = obj["is_Chamando"];
 
-        const char *m1 = obj["mensagem"];                             // "Sala de massagem"
-        unsigned int m1_time = atoi(obj["segundos_mensagem"]);        // "3"
-        unsigned int m1_loops = atoi(obj["qtd_repeticoes_mensagem"]); // "2"
+        std::string text = std::string("SALA:") + std::string(obj["sala"] | "--");
 
-        const char *m2 = obj["mensagem1"];                             // "Teste de envio de mensagem1"
-        unsigned int m2_time = atoi(obj["segundos_mensagem1"]);        // "3"
-        unsigned int m2_loops = atoi(obj["qtd_repeticoes_mensagem1"]); // "2"
+        strlcpy(mainText, text.c_str(), 8);
 
-        bool _vibration = atoi(obj["qtd_vibracoes"]) > 0; // "3"
-        //const char *obj_segundos_vibracoes = obj["segundos_vibracoes"];             // "1"
-        //const char *obj_dt_chamado_frma = obj["dt_chamado_frma"];                   // "21-08-2019"
-        //const char *obj_hr_chamado_formatado = obj["hr_chamado_formatado"];         // "14:32:13"
-        mainMessage = "Dirija-se a sala";
+        calling = true;
 
-        call(m1, m1_time, m1_loops, m2, m2_time, m2_loops, _vibration);
+        beep(3);
+
+        // const char *m1 = obj["mensagem"];                             // "Sala de massagem"
+        // unsigned int m1_time = atoi(obj["segundos_mensagem"]);        // "3"
+        // unsigned int m1_loops = atoi(obj["qtd_repeticoes_mensagem"]); // "2"
+
+        // const char *m2 = obj["mensagem1"];                             // "Teste de envio de mensagem1"
+        // unsigned int m2_time = atoi(obj["segundos_mensagem1"]);        // "3"
+        // unsigned int m2_loops = atoi(obj["qtd_repeticoes_mensagem1"]); // "2"
+
+        // bool _vibration = atoi(obj["qtd_vibracoes"]) > 0; // "3"
+        // //const char *obj_segundos_vibracoes = obj["segundos_vibracoes"];             // "1"
+        // //const char *obj_dt_chamado_frma = obj["dt_chamado_frma"];                   // "21-08-2019"
+        // //const char *obj_hr_chamado_formatado = obj["hr_chamado_formatado"];         // "14:32:13"
+
+        // call(sala, m1, m1_time, m1_loops, m2, m2_time, m2_loops, _vibration);
+      }
+      else
+      {
+        strlcpy(mainText, "AGUARDE", 8);
+        calling = false;
       }
     }
     else
@@ -355,35 +393,55 @@ void Qboy::call(const char *m1, unsigned int m1_time, unsigned int m1_count, con
       Serial.println(m1);
       if (_vibration)
       {
-        vibrationOn();
+        beep(2);
       }
       delay_s(m1_time);
       m1_count--;
-      vibrationOff();
     }
     if (m2_count > 0)
     {
       Serial.println(m2);
       if (_vibration)
       {
-        vibrationOn();
+        beep(2);
       }
       delay_s(m2_time);
       m2_count--;
-      vibrationOff();
     }
-    delay(1000);
   }
 }
 
-void Qboy::vibrationOn()
+void Qboy::flash(unsigned int times)
 {
-  digitalWrite(D8, HIGH);
+  for (int i = 1; i <= times; i++)
+  {
+    digitalWrite(LED_PIN, HIGH);
+    delay(100);
+    digitalWrite(LED_PIN, LOW);
+    delay(100);
+  }
 }
 
-void Qboy::vibrationOff()
+void Qboy::beep(unsigned int times)
 {
-  digitalWrite(D8, LOW);
+  for (int i = 1; i <= times; i++)
+  {
+    digitalWrite(BEEP_PIN, HIGH);
+    delay(100);
+    digitalWrite(BEEP_PIN, LOW);
+    delay(100);
+  }
+}
+
+void Qboy::vibrate(unsigned int times, unsigned int interval)
+{
+  for (int i = 1; i <= times; i++)
+  {
+    digitalWrite(VIBRATION_PIN, HIGH);
+    delay(interval);
+    digitalWrite(VIBRATION_PIN, LOW);
+    delay(interval);
+  }
 }
 
 void Qboy::delay_s(unsigned int time)
