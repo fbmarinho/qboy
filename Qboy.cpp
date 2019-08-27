@@ -31,33 +31,34 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 #include <Ticker.h>
 Ticker clock;
 Ticker screenRefresh;
+Ticker scroller;
 
 #define LED_PIN D6
 #define VIBRATION_PIN D7
 #define BEEP_PIN D8
 
 //Constructor
-Qboy::Qboy(const char *id)
+Qboy::Qboy(String id)
 {
   counterPing = 0;
   counterPair = 0;
   shouldPing = false;
   shouldPair = false;
-  calling = false;
-  sala = "17";
   wifiStatus = "X";
   idPedido = "WAIT";
   mainText = "AGUARDE";
-  message = "";
+  scroll(" BRMED ");
+  firsttime = false;
   _id = id;
+
+  pinMode(LED_PIN, OUTPUT);
+  pinMode(BEEP_PIN, OUTPUT);
+  pinMode(VIBRATION_PIN, OUTPUT);
 }
 
 // Setup stage
 void Qboy::start()
 {
-  pinMode(LED_PIN, OUTPUT);
-  pinMode(BEEP_PIN, OUTPUT);
-  pinMode(VIBRATION_PIN, OUTPUT);
   //initialize display
   // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
@@ -69,11 +70,8 @@ void Qboy::start()
 
   display.clearDisplay();
   display.display();
-  delay(500);
 
   showLogo(2000);
-
-  screenRefresh.attach_ms(100, &Qboy::_refresh, this); // Start screen refresh
 }
 
 void Qboy::_refresh(Qboy *pThis)
@@ -113,31 +111,39 @@ void Qboy::mainScreen()
   // Lower line
   display.setCursor(0, 48);
   display.setTextSize(2);
+  display.setTextWrap(false);
   display.print(message);
 
   display.display();
 }
 
-void Qboy::scroll(char *message)
+void Qboy::scroll(String _message)
 {
-  display.setTextWrap(false);
 
-  int x = display.width();
-  int len = 12 * strlen(message); // 12 = 6 pixels/character * text size 2
+  // Lower line
+  message = _message;
+  // if (_message.length() * 12 > display.width())
+  // {
 
-  for (int i = 0; i <= 2 * len; i++)
-  {
-    display.setCursor(x, 48);
-    display.print(message);
-    display.display();
+  //   if (!firsttime)
+  //   {
+  //     _message = String(_message + ". ");
+  //     firsttime = true;
+  //   }
 
-    if (--x < -len)
-      x = display.width();
-  }
+  //   String scrolled;
+  //   String temp;
+  //   String temp2;
+
+  //   temp = _message.substring(1, _message.length());
+  //   temp2 = _message.substring(0, 1);
+
+  //   _message = String(temp + temp2);
+  // }
 }
 
 //Conectar a rede
-void Qboy::connect(const char *ssid, const char *password, int _pingInterval, int _pairInterval, int _listenInterval)
+void Qboy::connect(String ssid, String password, int _pingInterval, int _pairInterval, int _listenInterval)
 {
   pingInterval = _pingInterval;
   pairInterval = _pairInterval;
@@ -145,48 +151,58 @@ void Qboy::connect(const char *ssid, const char *password, int _pingInterval, in
 
   isConnected = false;
   shouldPair = false;
-  WiFi.begin(ssid, password);
+  WiFi.begin(ssid.c_str(), password.c_str());
 
   while (WiFi.status() != WL_CONNECTED)
   {
     Serial.print(".");
-    delay(200);
+    flash(1);
   }
-  Serial.print("Conectado no IP: ");
-  Serial.println(WiFi.localIP());
+
+  Serial.print("CONECTADO");
+  Serial.print(WiFi.localIP());
+
   wifiStatus = "OK";
   isConnected = true;
   shouldPair = true;
 
-  beep(3);
-  clock.attach(1, &Qboy::_tick, this); // Start clock tick
+  clock.attach(1, &Qboy::_tick, this);                 // Start clock tick
+  screenRefresh.attach_ms(100, &Qboy::_refresh, this); // Start screen refresh
 }
 
 //Loop
 void Qboy::loop()
 {
+
   if (shouldRefresh)
   {
     mainScreen();
     shouldRefresh = false;
   }
 
-  if (shouldPing)
+  if (!calling)
   {
-    ping();
-    shouldPing = false;
-  }
 
-  if (isConnected && shouldPair)
-  {
-    pair();
-    shouldPair = false;
-  }
+    mainText = "AGUARDE";
+    scroll("Fique atento ao próximo chamado");
 
-  if (isPaired && shouldListen)
-  {
-    listen();
-    shouldListen = false;
+    if (shouldPing)
+    {
+      ping();
+      shouldPing = false;
+    }
+
+    if (isConnected && shouldPair)
+    {
+      pair();
+      shouldPair = false;
+    }
+
+    if (isPaired && shouldListen)
+    {
+      listen();
+      shouldListen = false;
+    }
   }
 }
 
@@ -232,9 +248,12 @@ void Qboy::ping()
   }
   else
   {
-    Serial.println("Not connected !");
+    //Serial.println("Not connected !");
 
     wifiStatus = "X";
+    mainText = "OFFLINE";
+    scroll("Verifique a conexao");
+    firsttime = false;
 
     isConnected = false;
   }
@@ -243,13 +262,12 @@ void Qboy::ping()
 //Parear dispositivo
 void Qboy::pair()
 {
-  std::string url = std::string("http://easystop.com.br/api/qboy/dispositivo/parear/") + std::string(_id);
-
-  //Serial.println(url.c_str());
   isPaired = false;
 
+  String url = String("http://easystop.com.br/api/qboy/dispositivo/parear/" + _id);
+
   HTTPClient http;
-  http.begin(url.c_str());
+  http.begin(url);
 
   int httpCode = http.GET();
 
@@ -278,19 +296,21 @@ void Qboy::pair()
       {
         JsonObject obj = doc[0];
 
-        strlcpy(idPedido, obj["id_pedido_exame"] | "ERRO", 5);
+        idPedido = String(obj["id_pedido_exame"] | "ERRO");
 
         mainText = "AGUARDE";
-
+        scroll("FIQUE ATENTO AO CHAMADO");
+        firsttime = false;
         isPaired = true;
 
         flash(1);
       }
       else
       {
-        strlcpy(idPedido, " N/A", 5);
+        idPedido = " N/A";
         mainText = "ASSOCIE";
-
+        scroll("Dirija-se a recepcao");
+        firsttime = false;
         beep(1);
       }
     }
@@ -311,7 +331,7 @@ void Qboy::pair()
 //Escutar chamados
 void Qboy::listen()
 {
-  std::string url = std::string("http://easystop.com.br/api/qboy/dispositivo/checar/") + std::string(_id) + std::string("&") + std::string(idPedido);
+  String url = String("http://easystop.com.br/api/qboy/dispositivo/checar/" + _id + "&" + idPedido);
 
   HTTPClient http;
   http.begin(url.c_str());
@@ -335,38 +355,19 @@ void Qboy::listen()
         deserializeJson(doc, json);
 
         JsonObject obj = doc[0];
-        //const char *obj_id_Chamado = obj["id_Chamado"];                             // "141"
-        //const char *obj_id_pedido_exame = obj["id_pedido_exame"];                   // "1450"
-        //const char *obj_id_dispositivo = obj["id_dispositivo"];                     // "1456600300kkkksss*"
-        //const char *obj_dt_chamado = obj["dt_chamado"];                             // "2019-08-21 14:32:13"
-        //const char *obj_is_Chamando = obj["is_Chamando"];
-
-        std::string text = std::string("SALA:") + std::string(obj["sala"] | "--");
-
-        strlcpy(mainText, text.c_str(), 8);
 
         calling = true;
 
-        beep(3);
+        String room = String("SALA:" + String(obj["sala"] | "--"));
+        String m1 = String(String(obj["mensagem"] | ""));
+        String m2 = String(String(obj["mensagem1"] | ""));
+        bool vibration = atoi(obj["qtd_vibracoes"]) > 0;
+        unsigned int loops = atoi(obj["mensagem1"]);
 
-        // const char *m1 = obj["mensagem"];                             // "Sala de massagem"
-        // unsigned int m1_time = atoi(obj["segundos_mensagem"]);        // "3"
-        // unsigned int m1_loops = atoi(obj["qtd_repeticoes_mensagem"]); // "2"
-
-        // const char *m2 = obj["mensagem1"];                             // "Teste de envio de mensagem1"
-        // unsigned int m2_time = atoi(obj["segundos_mensagem1"]);        // "3"
-        // unsigned int m2_loops = atoi(obj["qtd_repeticoes_mensagem1"]); // "2"
-
-        // bool _vibration = atoi(obj["qtd_vibracoes"]) > 0; // "3"
-        // //const char *obj_segundos_vibracoes = obj["segundos_vibracoes"];             // "1"
-        // //const char *obj_dt_chamado_frma = obj["dt_chamado_frma"];                   // "21-08-2019"
-        // //const char *obj_hr_chamado_formatado = obj["hr_chamado_formatado"];         // "14:32:13"
-
-        // call(sala, m1, m1_time, m1_loops, m2, m2_time, m2_loops, _vibration);
+        call(room, m1, m2, vibration, loops);
       }
       else
       {
-        strlcpy(mainText, "AGUARDE", 8);
         calling = false;
       }
     }
@@ -384,31 +385,25 @@ void Qboy::listen()
   http.end(); //Close connection
 }
 
-void Qboy::call(const char *m1, unsigned int m1_time, unsigned int m1_count, const char *m2, unsigned int m2_time, unsigned int m2_count, bool _vibration)
+void Qboy::call(String _room, String _m1, String _m2, bool _vibration, unsigned int _loops)
 {
-  while (m1_count > 0 || m2_count > 0)
+  mainText = _room;
+
+  while (_loops > 0)
   {
-    if (m1_count > 0)
+
+    scroll(_m1);
+    scroll(_m2);
+
+    if (_vibration)
     {
-      Serial.println(m1);
-      if (_vibration)
-      {
-        beep(2);
-      }
-      delay_s(m1_time);
-      m1_count--;
+      flash(1);
     }
-    if (m2_count > 0)
-    {
-      Serial.println(m2);
-      if (_vibration)
-      {
-        beep(2);
-      }
-      delay_s(m2_time);
-      m2_count--;
-    }
+
+    _loops--;
   }
+
+  calling = false;
 }
 
 void Qboy::flash(unsigned int times)
@@ -438,9 +433,9 @@ void Qboy::vibrate(unsigned int times, unsigned int interval)
   for (int i = 1; i <= times; i++)
   {
     digitalWrite(VIBRATION_PIN, HIGH);
-    delay(interval);
+    delay_s(interval);
     digitalWrite(VIBRATION_PIN, LOW);
-    delay(interval);
+    delay_s(interval);
   }
 }
 
