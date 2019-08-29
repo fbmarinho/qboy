@@ -32,6 +32,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 Ticker clock;
 Ticker screenRefresh;
 Ticker scroller;
+Ticker blinker;
 
 #define LED_PIN D6
 #define VIBRATION_PIN D7
@@ -40,6 +41,7 @@ Ticker scroller;
 //Constructor
 Qboy::Qboy(String id)
 {
+  blinkCount = 0;
   counterPing = 0;
   counterPair = 0;
   shouldPing = false;
@@ -47,7 +49,7 @@ Qboy::Qboy(String id)
   wifiStatus = "X";
   idPedido = "WAIT";
   mainText = "AGUARDE";
-  scroll(" BRMED ");
+  setMessage("Bem-vindo a BRMED");
   firsttime = false;
   _id = id;
 
@@ -114,32 +116,29 @@ void Qboy::mainScreen()
   display.setTextWrap(false);
   display.print(message);
 
+  scroll();
+
   display.display();
 }
 
-void Qboy::scroll(String _message)
+void Qboy::scroll()
 {
+  if (message.length() * 12 > display.width())
+  {
+    if (!firsttime)
+    {
+      message = String(message + ". ");
+      firsttime = true;
+    }
 
-  // Lower line
-  message = _message;
-  // if (_message.length() * 12 > display.width())
-  // {
+    String temp;
+    String temp2;
 
-  //   if (!firsttime)
-  //   {
-  //     _message = String(_message + ". ");
-  //     firsttime = true;
-  //   }
+    temp = message.substring(1, message.length());
+    temp2 = message.substring(0, 1);
 
-  //   String scrolled;
-  //   String temp;
-  //   String temp2;
-
-  //   temp = _message.substring(1, _message.length());
-  //   temp2 = _message.substring(0, 1);
-
-  //   _message = String(temp + temp2);
-  // }
+    message = String(temp + temp2);
+  }
 }
 
 //Conectar a rede
@@ -156,7 +155,8 @@ void Qboy::connect(String ssid, String password, int _pingInterval, int _pairInt
   while (WiFi.status() != WL_CONNECTED)
   {
     Serial.print(".");
-    flash(1);
+    delay(2);
+    flash(500, 3);
   }
 
   Serial.print("CONECTADO");
@@ -173,7 +173,6 @@ void Qboy::connect(String ssid, String password, int _pingInterval, int _pairInt
 //Loop
 void Qboy::loop()
 {
-
   if (shouldRefresh)
   {
     mainScreen();
@@ -182,10 +181,6 @@ void Qboy::loop()
 
   if (!calling)
   {
-
-    mainText = "AGUARDE";
-    scroll("Fique atento ao próximo chamado");
-
     if (shouldPing)
     {
       ping();
@@ -240,21 +235,14 @@ void Qboy::ping()
 {
   if (WiFi.status() == WL_CONNECTED)
   {
-    Serial.println("Ping !");
-
     wifiStatus = "OK";
-
     isConnected = true;
   }
   else
   {
-    //Serial.println("Not connected !");
-
     wifiStatus = "X";
     mainText = "OFFLINE";
-    scroll("Verifique a conexao");
-    firsttime = false;
-
+    setMessage("Verifique a conexao");
     isConnected = false;
   }
 }
@@ -298,19 +286,13 @@ void Qboy::pair()
 
         idPedido = String(obj["id_pedido_exame"] | "ERRO");
 
-        mainText = "AGUARDE";
-        scroll("FIQUE ATENTO AO CHAMADO");
-        firsttime = false;
         isPaired = true;
-
-        flash(1);
       }
       else
       {
         idPedido = " N/A";
         mainText = "ASSOCIE";
-        scroll("Dirija-se a recepcao");
-        firsttime = false;
+        setMessage("Dirija-se a recepcao");
         beep(1);
       }
     }
@@ -359,15 +341,23 @@ void Qboy::listen()
         calling = true;
 
         String room = String("SALA:" + String(obj["sala"] | "--"));
-        String m1 = String(String(obj["mensagem"] | ""));
-        String m2 = String(String(obj["mensagem1"] | ""));
+        String m1 = String(String(obj["mensagem"] | "msg 1"));
+        String m2 = String(String(obj["mensagem1"] | "msg 2"));
         bool vibration = atoi(obj["qtd_vibracoes"]) > 0;
-        unsigned int loops = atoi(obj["mensagem1"]);
+        unsigned int loops = atoi(obj["qtd_repeticoes_mensagem"]);
+
+        //debug
+        Serial.println(m1);
+        Serial.println(m2);
+        Serial.println(vibration);
+        Serial.println(loops);
 
         call(room, m1, m2, vibration, loops);
       }
       else
       {
+        mainText = "AGUARDE";
+        setMessage("Fique atento ao chamado");
         calling = false;
       }
     }
@@ -389,16 +379,15 @@ void Qboy::call(String _room, String _m1, String _m2, bool _vibration, unsigned 
 {
   mainText = _room;
 
+  if (_vibration)
+  {
+    flash(1000, _loops);
+  }
+
   while (_loops > 0)
   {
 
-    scroll(_m1);
-    scroll(_m2);
-
-    if (_vibration)
-    {
-      flash(1);
-    }
+    setMessage(_m1);
 
     _loops--;
   }
@@ -406,15 +395,30 @@ void Qboy::call(String _room, String _m1, String _m2, bool _vibration, unsigned 
   calling = false;
 }
 
-void Qboy::flash(unsigned int times)
+void Qboy::_blink(Qboy *pThis)
 {
-  for (int i = 1; i <= times; i++)
+  pThis->blink();
+}
+
+void Qboy::blink()
+{
+  if (blinkCount > 0)
   {
-    digitalWrite(LED_PIN, HIGH);
-    delay(100);
-    digitalWrite(LED_PIN, LOW);
-    delay(100);
+    digitalWrite(LED_PIN, !(digitalRead(LED_PIN)));
+    blinkCount--;
   }
+  else
+  {
+    blinker.detach();
+    blinkCount = 0;
+    digitalWrite(LED_PIN, LOW);
+  }
+}
+
+void Qboy::flash(uint32_t interval, unsigned int times)
+{
+  blinkCount = times;
+  blinker.attach_ms(interval, &Qboy::_blink, this);
 }
 
 void Qboy::beep(unsigned int times)
@@ -453,4 +457,13 @@ void Qboy::showLogo(int time)
   display.drawBitmap(0, 0, logo, 128, 64, WHITE);
   display.display();
   delay(time);
+}
+
+void Qboy::setMessage(String _message)
+{
+  if (_message != message)
+  {
+    message = _message;
+    firsttime = false;
+  }
 }

@@ -41,8 +41,13 @@ private:
   int counterListen;
   int listenInterval;
 
+  unsigned int blinkCount;
+
   static void _tick(Qboy *pThis);
   static void _refresh(Qboy *pThis);
+  static void _blink(Qboy *pThis);
+
+  void blink();
 
   void tick();
   void refresh();
@@ -50,13 +55,14 @@ private:
   void delay_s(unsigned int time);
 
   void mainScreen();
-  void scroll(String _message);
+  void scroll();
+  void setMessage(String _message);
   void ping();
   void pair();
   void listen();
   void call(String _room, String _m1, String _m2, bool _vibration, unsigned int _loops);
   void beep(unsigned int times);
-  void flash(unsigned int times);
+  void flash(uint32_t interval, unsigned int times);
   void vibrate(unsigned int times, unsigned int interval);
 
   void showLogo(int time);
